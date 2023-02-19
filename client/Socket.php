@@ -1,43 +1,15 @@
 <?php
 
-class Socket
+abstract class Socket
 {
 	const RECEIVE_TIMEOUT = 10;
 
-	private $sock;
-	private $throw_exception_on_timeout;
-	private $connected;
-	private $host;
-	private $port;
+	protected $sock;
+	protected $throw_exception_on_timeout;
+	protected $connected;
 
-	public function __construct($ip='', $port='', $throw_exception_on_timeout = false, $auto_connect = true)
-	{
-		$this->sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-		if ($this->sock === FALSE) 
-		{
-			throw new Exception("Error creating socket: ".socket_last_error()." ".socket_strerror(socket_last_error()));
-		}
-		$this->connected = false;
-		$this->host = $ip;
-		$this->port = $port;
-		if ($auto_connect)
-		{
-			$this->connect();
-		}
-		$this->throw_exception_on_timeout = $throw_exception_on_timeout;
-	}
-
-	public function connect()
-	{
-		if ($this->connected) return;
-		// тушим ошибки, иначе вывалится с PHP Error вместо exception
-		if (@socket_connect($this->sock, $this->host, $this->port) === FALSE) 
-		{
-			throw new Exception("Error connecting: ".socket_last_error()." ".socket_strerror(socket_last_error()));
-		}
-		$this->connected = true;
-	}
-
+	abstract public function connect();
+	
 	/**
 	 * Закрытие соединения
 	 */
@@ -51,7 +23,7 @@ class Socket
 	}
 
 	/*
-	 * Пропихивает строку в сокет. Бросит exception если случилась лажа.
+	 * Пропихивает строку в сокет.
 	 */
 
 	public function iterativeSend($s)
@@ -156,4 +128,70 @@ class Socket
 		return $this->iterativeReceive($len, 1);
 	}
 
+}
+
+class IPSocket extends Socket
+{
+	private $host;
+	private $port;
+	
+	public function __construct($ip='', $port='', $throw_exception_on_timeout = false, $auto_connect = true)
+	{
+		$this->sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+		if ($this->sock === FALSE) 
+		{
+			throw new Exception("Error creating socket: ".socket_last_error()." ".socket_strerror(socket_last_error()));
+		}
+		$this->connected = false;
+		$this->host = $ip;
+		$this->port = $port;
+		if ($auto_connect)
+		{
+			$this->connect();
+		}
+		$this->throw_exception_on_timeout = $throw_exception_on_timeout;
+	}
+
+	public function connect()
+	{
+		if ($this->connected) return;
+		// тушим ошибки, иначе вывалится с PHP Error вместо exception
+		if (@socket_connect($this->sock, $this->host, $this->port) === FALSE) 
+		{
+			throw new Exception("Error connecting: ".socket_last_error()." ".socket_strerror(socket_last_error()));
+		}
+		$this->connected = true;
+	}
+}
+
+class UnixSocket extends Socket
+{
+	private $path;
+
+	public function __construct($path='', $throw_exception_on_timeout = false, $auto_connect = true)
+	{
+		$this->sock = socket_create(AF_UNIX, SOCK_STREAM, 0);
+		if ($this->sock === FALSE) 
+		{
+			throw new Exception("Error creating socket: ".socket_last_error()." ".socket_strerror(socket_last_error()));
+		}
+		$this->connected = false;
+		$this->path = $path;
+		if ($auto_connect)
+		{
+			$this->connect();
+		}
+		$this->throw_exception_on_timeout = $throw_exception_on_timeout;
+	}
+
+	public function connect()
+	{
+		if ($this->connected) return;
+		// тушим ошибки, иначе вывалится с PHP Error вместо exception
+		if (@socket_connect($this->sock, $this->path) === FALSE) 
+		{
+			throw new Exception("Error connecting: ".socket_last_error()." ".socket_strerror(socket_last_error()));
+		}
+		$this->connected = true;
+	}
 }

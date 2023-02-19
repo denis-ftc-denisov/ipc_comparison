@@ -6,6 +6,7 @@
 #include <sys/file.h>
 #include <errno.h>
 #include <iostream>
+#include <sys/un.h>
 
 #include "SynchronousSocket.h"
 #include "task.h"
@@ -15,6 +16,8 @@ using namespace std;
 const int LISTEN_PORT = 19876;
 const int LISTEN_BACKLOG = 10;
 const int EXIT_FAIL = 1;
+
+const char* UNIX_SOCKET_PATH = "/tmp/ipc_test_socket";
 
 void ProcessRequests(int socket_fd)
 {
@@ -38,13 +41,13 @@ void ProcessRequests(int socket_fd)
 	s.Disconnect();
 }
 
-int main()
+void* IPSocketThread(void* arg)
 {
 	int listensock;
 	if ((listensock = socket(PF_INET, SOCK_STREAM, 0)) == -1)
 	{
 		cerr << "Could not create socket for listening...\n";
-		return EXIT_FAIL;
+		exit(EXIT_FAIL);
 	}
 	struct sockaddr_in listenaddr;
 	memset(&listenaddr, 0, sizeof(listenaddr));
@@ -54,18 +57,17 @@ int main()
 	if (bind(listensock, (struct  sockaddr *)(&listenaddr), sizeof(struct sockaddr_in)) == -1)
 	{
 		cerr << "Could not bind listening socket...\n";
-		return EXIT_FAIL;
+		exit(EXIT_FAIL);
 	}
 	if (listen(listensock, LISTEN_BACKLOG) == -1)
 	{
 		cerr << "Could not set socket into listening mode...\n";
-		return EXIT_FAIL;
+		exit(EXIT_FAIL);
 	}
 	struct sockaddr_in peeraddr;
 	socklen_t paddrlen;
 	paddrlen = sizeof(peeraddr);
 	int recsock;
-	cout << "Press Ctrl-C for exit\n";
 	cout << "Accepting connections on port " << LISTEN_PORT << "\n";           
 	while (true)
 	{
@@ -83,6 +85,101 @@ int main()
 	{
 		cerr << "Could not close listening socket...\n";
 		exit(EXIT_FAIL);
+	}
+}
+
+void* UnixSocketThread(void* arg)
+{
+	int listensock;
+	if ((listensock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
+	{
+		cerr << "Could not create socket for listening...\n";
+		exit(EXIT_FAIL);
+	}
+	struct sockaddr_un listenaddr;
+	listenaddr.sun_family = AF_UNIX;
+	strcpy(listenaddr.sun_path, UNIX_SOCKET_PATH);
+	unlink(listenaddr.sun_path);
+	socklen_t len = strlen(listenaddr.sun_path) + sizeof(listenaddr.sun_family);
+	if (bind(listensock, (struct sockaddr*)&listenaddr, len) != 0)
+	{
+		cerr << "Error on binding socket \n";
+		perror("bind");
+		exit(EXIT_FAIL);
+	}
+	if (listen(listensock, LISTEN_BACKLOG) == -1)
+	{
+		cerr << "Could not set socket into listening mode...\n";
+		exit(EXIT_FAIL);
+	}
+	struct sockaddr_un peeraddr;
+	socklen_t paddrlen;
+	paddrlen = sizeof(peeraddr);
+	int recsock;
+	cout << "Accepting connections on path " << UNIX_SOCKET_PATH << "\n";           
+	while (true)
+	{
+		(recsock = accept(listensock, (struct sockaddr *)(&peeraddr), &paddrlen));
+		if (recsock == -1)
+		{
+			cerr << "Error accepting connection, errno = " << errno << "\n";
+			continue;
+		}
+		cout << "Accepted connection from " << peeraddr.sun_path << "\n";
+		ProcessRequests(recsock);
+	}                                                   
+	cerr << "Accept error...\n";
+	if (close(listensock) == -1)
+	{
+		cerr << "Could not close listening socket...\n";
+		exit(EXIT_FAIL);
+	}
+}
+
+void CreateSocketThread(void *(*start)(void *))
+{   
+	pthread_t thread;
+	pthread_attr_t attr;
+	if (pthread_attr_init(&attr) != 0)
+	{                    	
+		throw (string)("pthread_attr_init error");
+	}
+	if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))
+	{
+		throw (string)("pthread_attr_setdetachstate error");
+	}                 
+	if (pthread_create(&thread, &attr, start, nullptr) != 0)
+	{                      
+		throw (string)("pthread_create error");
+	}                
+}
+
+void CreateUnixSocket()
+{   
+	pthread_t thread;
+	pthread_attr_t attr;
+	if (pthread_attr_init(&attr) != 0)
+	{                    	
+		throw (string)("pthread_attr_init error");
+	}
+	if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))
+	{
+		throw (string)("pthread_attr_setdetachstate error");
+	}                 
+	if (pthread_create(&thread, &attr, &IPSocketThread, nullptr) != 0)
+	{                      
+		throw (string)("pthread_create error");
+	}                
+}
+
+int main()
+{
+	CreateSocketThread(&IPSocketThread);
+	CreateSocketThread(&UnixSocketThread);
+	cout << "Press Ctrl-C for exit\n";
+	while (true)
+	{
+		sleep(10);
 	}
 	return 0;
 }
