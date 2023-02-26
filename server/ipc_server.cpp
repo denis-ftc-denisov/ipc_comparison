@@ -7,7 +7,10 @@
 #include <errno.h>
 #include <iostream>
 #include <sys/un.h>
+#include <sstream>
+#include <signal.h>
 
+#include "SharedMemoryChannel.h"
 #include "SynchronousSocket.h"
 #include "task.h"
 
@@ -18,9 +21,29 @@ const int LISTEN_BACKLOG = 10;
 const int EXIT_FAIL = 1;
 
 const char* UNIX_SOCKET_PATH = "/tmp/ipc_test_socket";
+const char* SHMEM_SOCKET_PATH = "/tmp/ipc_test_socket_shmem";
 
-void ProcessRequests(int socket_fd)
+void CreateThread(void *(*start)(void *), void* arg = nullptr)
+{   
+	pthread_t thread;
+	pthread_attr_t attr;
+	if (pthread_attr_init(&attr) != 0)
+	{                    	
+		throw (string)("pthread_attr_init error");
+	}
+	if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))
+	{
+		throw (string)("pthread_attr_setdetachstate error");
+	}                 
+	if (pthread_create(&thread, &attr, start, arg) != 0)
+	{                      
+		throw (string)("pthread_create error");
+	}                
+}
+
+void* ProcessRequests(void *arg)
 {
+	int socket_fd = *(int*)arg;
 	SynchronousSocket s;
 	s.Init(socket_fd);
 	try {
@@ -78,7 +101,7 @@ void* IPSocketThread(void* arg)
 			continue;
 		}
 		cout << "Accepted connection from " << inet_ntoa(peeraddr.sin_addr) << ":" << ntohs(peeraddr.sin_port) << "\n";
-		ProcessRequests(recsock);
+		CreateThread(&ProcessRequests, &recsock);
 	}                                                   
 	cerr << "Accept error...\n";
 	if (close(listensock) == -1)
@@ -126,7 +149,7 @@ void* UnixSocketThread(void* arg)
 			continue;
 		}
 		cout << "Accepted connection from " << peeraddr.sun_path << "\n";
-		ProcessRequests(recsock);
+		CreateThread(&ProcessRequests, &recsock);
 	}                                                   
 	cerr << "Accept error...\n";
 	if (close(listensock) == -1)
@@ -136,46 +159,89 @@ void* UnixSocketThread(void* arg)
 	}
 }
 
-void CreateSocketThread(void *(*start)(void *))
-{   
-	pthread_t thread;
-	pthread_attr_t attr;
-	if (pthread_attr_init(&attr) != 0)
-	{                    	
-		throw (string)("pthread_attr_init error");
+void* ProcessShmemRequests(void *arg)
+{
+	int socket_fd = *(int*)arg;
+	SynchronousSocket s;
+	s.Init(socket_fd);
+	try {
+		string initial = s.ReceiveMessage();
+		SharedMemoryChannel channel;
+		ostringstream result;
+		result << channel.GetReceiveKey() << ":" << 
+						channel.GetSendKey() << ":" <<
+						channel.GetSharedMemKey();
+		s.SendMessage(result.str());
+		while (true)
+		{
+			string message = channel.Receive();
+			channel.Send(Task(message));
+		}
 	}
-	if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))
+	catch (string s)
 	{
-		throw (string)("pthread_attr_setdetachstate error");
-	}                 
-	if (pthread_create(&thread, &attr, start, nullptr) != 0)
-	{                      
-		throw (string)("pthread_create error");
-	}                
+		cerr << "Error in socket " << s << "\n";
+	}
+	catch (...)
+	{
+		cerr << "Unknown error in socket\n";
+	}
+	s.Disconnect();                                 
 }
 
-void CreateUnixSocket()
-{   
-	pthread_t thread;
-	pthread_attr_t attr;
-	if (pthread_attr_init(&attr) != 0)
-	{                    	
-		throw (string)("pthread_attr_init error");
-	}
-	if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))
+void* SharedMemoryChannelSocketThread(void* arg)
+{
+	int listensock;
+	if ((listensock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
 	{
-		throw (string)("pthread_attr_setdetachstate error");
-	}                 
-	if (pthread_create(&thread, &attr, &IPSocketThread, nullptr) != 0)
-	{                      
-		throw (string)("pthread_create error");
-	}                
+		cerr << "Could not create socket for listening...\n";
+		exit(EXIT_FAIL);
+	}
+	struct sockaddr_un listenaddr;
+	listenaddr.sun_family = AF_UNIX;
+	strcpy(listenaddr.sun_path, SHMEM_SOCKET_PATH);
+	unlink(listenaddr.sun_path);
+	socklen_t len = strlen(listenaddr.sun_path) + sizeof(listenaddr.sun_family);
+	if (bind(listensock, (struct sockaddr*)&listenaddr, len) != 0)
+	{
+		cerr << "Error on binding socket \n";
+		perror("bind");
+		exit(EXIT_FAIL);
+	}
+	if (listen(listensock, LISTEN_BACKLOG) == -1)
+	{
+		cerr << "Could not set socket into listening mode...\n";
+		exit(EXIT_FAIL);
+	}
+	struct sockaddr_un peeraddr;
+	socklen_t paddrlen;
+	paddrlen = sizeof(peeraddr);
+	int recsock;
+	cout << "Accepting connections on path " << SHMEM_SOCKET_PATH << "\n";           
+	while (true)
+	{
+		(recsock = accept(listensock, (struct sockaddr *)(&peeraddr), &paddrlen));
+		if (recsock == -1)
+		{
+			cerr << "Error accepting connection, errno = " << errno << "\n";
+			continue;
+		}
+		CreateThread(&ProcessShmemRequests, &recsock);
+	}                                                   
+	cerr << "Accept error...\n";
+	if (close(listensock) == -1)
+	{
+		cerr << "Could not close listening socket...\n";
+		exit(EXIT_FAIL);
+	}
 }
 
 int main()
 {
-	CreateSocketThread(&IPSocketThread);
-	CreateSocketThread(&UnixSocketThread);
+	signal(SIGPIPE, SIG_IGN);
+    CreateThread(&IPSocketThread);
+	CreateThread(&UnixSocketThread);
+	CreateThread(&SharedMemoryChannelSocketThread);
 	cout << "Press Ctrl-C for exit\n";
 	while (true)
 	{

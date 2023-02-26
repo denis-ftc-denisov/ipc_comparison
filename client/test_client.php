@@ -1,6 +1,7 @@
 ﻿<?php
 
 require_once('Socket.php');
+require_once('SharedMemoryChannel.php');
 
 function makeRequest($size)
 {
@@ -55,6 +56,38 @@ function testUnixSocket($amount, $reconnect, $size)
 	}
 }
 
+function testSharedMemory($amount, $reconnect, $size)
+{
+	$s = null;
+	$channel = null;
+	$current = 0;
+	for ($i = 0; $i < $amount; $i++)
+	{
+		if ($s === null)
+		{
+			$s = new UnixSocket('/tmp/ipc_test_socket_shmem');
+			$s->connect();
+			$s->sendMessage("mem");
+			$result = $s->receiveMessage();
+			$data = explode(":", $result);
+			$channel = new SharedMemoryChannel([
+				'send' => $data[0],
+				'receive' => $data[1],
+				'mem' => $data[2]
+			]);
+			$current = 0;
+		}
+		$m = makeRequest($size);
+		$channel->sendMessage($m);
+		$r = $channel->receiveMessage();
+		$current++;
+		if ($current >= $reconnect)
+		{
+			$s = null;
+		}
+	}
+}
+
 $requests_amount = $argv[1];
 $requests_per_connect = $argv[2];
 $request_size = $argv[3];
@@ -74,6 +107,14 @@ print('Total: '.round($elapsed, 3).' seconds, '.round($requests_amount / $elapse
 print("Testing Unix socket:\n");
 $start = microtime(true);
 testUnixSocket($requests_amount, $requests_per_connect, $request_size);
+$finish = microtime(true);
+
+$elapsed = $finish - $start;
+print('Total: '.round($elapsed, 3).' seconds, '.round($requests_amount / $elapsed, 3).' RPS'."\n");
+
+print("Testing shared memory channel:\n");
+$start = microtime(true);
+testSharedMemory($requests_amount, $requests_per_connect, $request_size);
 $finish = microtime(true);
 
 $elapsed = $finish - $start;

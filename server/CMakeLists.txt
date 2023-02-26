@@ -14,8 +14,13 @@ ipc_server.cpp
 task.h
 task.cpp
 
+mutex.h
+mutex.cpp
+
 SynchronousSocket.cpp
 SynchronousSocket.h
+SharedMemoryChannel.cpp
+SharedMemoryChannel.h
 )
 ##################################################################################
 
