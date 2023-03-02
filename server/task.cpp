@@ -4,20 +4,15 @@
 
 using namespace std;
 
-int cnt[256];
-
 string Task(const string &message)
 {                
-	memset(cnt, 0, sizeof(cnt));
+	string result = "";
+	int result_length = message.length() / 8;
+	if (result_length < 1) result_length = 1;
+	for (int i = 0; i < result_length; i++) result += '\x0';
 	for (int i = 0; i < (int)message.length(); i++)
 	{
-		cnt[(int)(unsigned char)message[i]]++;
+		result[i % result_length] ^= message[i];
 	}
-	ostringstream result;
-	for (int i = 0; i < 256; i++)
-	{
-		if (cnt[i] == 0) continue;
-		result << i << ":" << cnt[i] << ";";
-	}
-	return result.str();
+	return result;
 }
