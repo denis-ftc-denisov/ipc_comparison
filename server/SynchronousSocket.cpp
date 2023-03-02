@@ -95,7 +95,7 @@ string SynchronousSocket::Receive(int amount)
 	time_t start = time(NULL);
 	while ((int)r.length() < amount)
 	{
-		char buf[1024];
+		char buf[BUFFER_SIZE];
 		int to_recv = min((int)sizeof(buf), amount - (int)r.length());
 		int res = recv(socket, buf, to_recv, 0);
 		if (res == 0)
