@@ -122,7 +122,7 @@ string SynchronousSocket::Receive(int amount)
 		}
 		else
 		{
-			r += (string)(buf, res);
+			r += string(buf, res);
 		}
 	}
 	return r;
